@@ -1,5 +1,4 @@
 import itertools as it
-from fnmatch import fnmatch
 from typing import Callable, Iterable, Literal, Tuple
 
 from . import datatypes as dt
@@ -45,12 +44,12 @@ def sorted_group_by(i, key):
 
 def grade_activity(
     act: ApiActivity,
-    match: str,
+    filters: list[Callable[[str], bool]],
     select: Literal["best", "last"],
     mark: Literal["binary", "percent"],
     merge: Literal["last", "avg"],
 ) -> dict[str, float]:
-    total = sum(1 for x in act.submissions_def if fnmatch(x, match))
+    total = sum(1 for x in act.submissions_def if all(f(x) for f in filters))
 
     select_fn: dict[
         str,
@@ -79,7 +78,7 @@ def grade_activity(
     subs = (
         (x, mark_fn[mark](x))
         for x in act.explore(submissionStatus="SUCCEEDED")
-        if True or fnmatch(x.submissionDefinitionUri, match)
+        if all(f(x.submissionDefinitionUri) for f in filters)
     )
 
     return {

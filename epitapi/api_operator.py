@@ -1,6 +1,5 @@
 import itertools as it
 import urllib.parse
-from fnmatch import fnmatch
 from multiprocessing.pool import ThreadPool
 from typing import Literal
 
@@ -13,10 +12,9 @@ class ApiActivity:
 
     def __init__(self, activity: str, students: list[str] | None = None):
         self.api = ApiOperator()
-        possible_activities = [x for x in self.api.activities() if fnmatch(x, activity)]
-        if len(possible_activities) != 1:
-            raise KeyError(f"{len(possible_activities)} activitie(s) match {activity}")
-        self.activity = urllib.parse.quote_plus(possible_activities[0])
+        if activity not in self.api.activities():
+            raise KeyError(f"Activity {activity} not found")
+        self.activity = urllib.parse.quote_plus(activity)
         self.students = students
 
         self.groups = self._groups()

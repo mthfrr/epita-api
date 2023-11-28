@@ -1,7 +1,7 @@
 [project]
 name = "epitapi"
 description = "Python API and CLI to interact with EPITA's Operator service"
-version = "0.0.2"
+version = "0.0.3"
 authors = [{ name = "Mathieu Fourré" }]
 dependencies = [
   "requests>=2.31",
@@ -20,7 +20,7 @@ license = { file = "LICENSE" }
 "Bug Reports" = "https://github.com/mthfrr/epita-api/issues"
 
 [project.scripts]
-epitapi = "epitapi:cli"
+epitapi = "epitapi.cli:cli"
 
 [build-system]
 # These are the assumed default build requirements from pip:
