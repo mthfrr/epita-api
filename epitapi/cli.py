@@ -3,6 +3,7 @@ import functools as ft
 import itertools as it
 import json
 from pathlib import Path
+from subprocess import check_call
 from typing import Callable, Optional
 
 import click
@@ -19,12 +20,20 @@ from .grades import grade_activity
     context_settings=dict(help_option_names=["-h", "--help"]),
 )
 @click.version_option()
+@click.option(
+    "--update",
+    is_flag=True,
+    default=False,
+    help="Reinstall epitapi with pipx",
+)
 @click.pass_context
-def cli(ctx=None, activity: str = "*"):
+def cli(ctx, update: bool):
     assert ctx is not None
-    if not any(c in activity for c in "*?[]"):
-        ctx.obj = ApiActivity(activity)
-        return
+
+    if update:
+        check_call("pipx reinstall epitapi", shell=True)
+        ctx.exit()
+    return
 
 
 def filter_args(x) -> set[str]:
