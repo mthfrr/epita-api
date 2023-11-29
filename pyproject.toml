@@ -1,7 +1,7 @@
 [project]
 name = "epitapi"
 description = "Python API and CLI to interact with EPITA's Operator service"
-version = "0.0.3"
+version = "0.0.4"
 authors = [{ name = "Mathieu Fourré" }]
 dependencies = [
   "requests>=2.31",
