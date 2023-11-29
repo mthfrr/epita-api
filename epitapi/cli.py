@@ -1,7 +1,8 @@
 import fnmatch
 import functools as ft
+import itertools as it
+import json
 from pathlib import Path
-from sys import argv
 from typing import Callable, Optional
 
 import click
@@ -26,30 +27,28 @@ def cli(ctx=None, activity: str = "*"):
         return
 
 
-@cli.result_callback()
-def check_and_run(actions: list):
-    print(" | ".join(f"{a.__annotations__['name']}" for a in actions))
-    dry_run = set()
-    for a in actions:
-        in_set = set(a.__annotations__["in"])
-        if in_set > dry_run:
-            print(f"{a.__annotations__['name']}: missing {dry_run - in_set}")
-            print(f"had:{dry_run} need:{in_set}")
-            return
-        dry_run = dry_run.union(a.__annotations__["out"])
+def filter_args(x) -> set[str]:
+    return set(a for a in x.__annotations__.keys() if a not in ("return", "kwargs"))
 
-    ctx = {}
+
+@cli.result_callback()
+@click.pass_context
+def check_and_run(ctx, actions: list):
+    # print(" | ".join(f"{a.__name__[1:]}({filter_args(a)})" for a in actions))
+
+    ctx_vars = {}
     for ac in actions:
-        res = ac(**{x: ctx[x] for x in ac.__annotations__["in"]})
+        for arg in filter_args(ac):
+            if arg not in ctx_vars:
+                click.echo(f"{arg} is missing from ctx (needed by {ac.__name__[1:]})")
+                ctx.abort()
+        res = ac(**{x: ctx_vars[x] for x in filter_args(ac)})
         if res is None:
             print(f"Interrupted on {ac.__annotations__['name']}")
-            return
-        if set(res.keys()) != set(ac.__annotations__["out"]):
-            print(
-                f"{ac.__annotations__['name']} broke out contract:\ngot:{res.keys()} expected:{ac.__annotations__['out']}"
-            )
-            return
-        ctx.update(res)
+            click.echo(f"Stopped on {ac.__name__[1:]}")
+            ctx.abort()
+
+        ctx_vars.update(res)
 
 
 @cli.command()
@@ -78,35 +77,21 @@ def act(ctx: click.Context, activity: str, logins: Optional[click.File]):
     if logins is not None:
         l_lst = Path(logins.name).read_text("utf-8").splitlines()
 
-    def _tmp() -> dict:
+    def _activity() -> dict:
         return {"api": ApiActivity(activity, l_lst), "filters": list()}
 
-    _tmp.__annotations__.update(
-        {
-            "name": "activity",
-            "in": [],
-            "out": ["api", "filters"],
-        }
-    )
-    return _tmp
+    return _activity
 
 
 @cli.command()
 def grps():
     """Display groups in an activity."""
 
-    def _tmp(api: ApiActivity):
+    def _grps(api: ApiActivity):
         print("\n".join([g.members[0] for g in api.groups.values()]))
         return {}
 
-    _tmp.__annotations__.update(
-        {
-            "name": "grps",
-            "in": ["api"],
-            "out": [],
-        }
-    )
-    return _tmp
+    return _grps
 
 
 @cli.command()
@@ -114,20 +99,14 @@ def grps():
 def disp(field):
     """Display value from context."""
 
-    def _tmp(**kwargs):
-        print(kwargs[field])
+    def _disp(**kwargs):
+        print(json.dumps(kwargs[field], indent=2))
         if isinstance(kwargs[field], dict) or isinstance(kwargs[field], list):
             print(len(kwargs[field]))
         return {}
 
-    _tmp.__annotations__.update(
-        {
-            "name": "disp",
-            "in": [field],
-            "out": [],
-        }
-    )
-    return _tmp
+    _disp.__annotations__[field] = str
+    return _disp
 
 
 @cli.command("filter")
@@ -164,7 +143,7 @@ def filt(pf, nf, test: bool):
     filts = [ft.partial(fnmatch.fnmatch, pat=pat) for pat in pf]
     filts.extend((ft.partial(not_fnmatch, pat=pat) for pat in nf))
 
-    def _tmp(api: ApiActivity, filters: list) -> dict | None:
+    def _filter(api: ApiActivity, filters: list) -> dict | None:
         filters.extend(filts)
         if test:
             print(
@@ -173,14 +152,7 @@ def filt(pf, nf, test: bool):
             return None
         return {"filters": filters}
 
-    _tmp.__annotations__.update(
-        {
-            "name": "filter",
-            "in": ["api", "filters"],
-            "out": ["filters"],
-        }
-    )
-    return _tmp
+    return _filter
 
 
 @cli.command()
@@ -205,44 +177,94 @@ def filt(pf, nf, test: bool):
     required=True,
     help="How to merge each assignment's mark",
 )
-def grade(select, mark, merge):
+@click.pass_context
+def grade(ctx, select, mark, merge):
     """Grades students for selected submissions (cf. filters)"""
 
-    def _tmp(api: ApiActivity, filters: list[Callable[[str], bool]]) -> dict:
+    def _grade(api: ApiActivity, filters: list[Callable[[str], bool]]) -> dict:
+        if api.students is None:
+            click.echo("Student list is required for grading. (see: act -l login.lst)")
+            ctx.abort()
         grades = {}
         if api.students is not None:
             grades = {s: 0.0 for s in api.students}
         grades.update(grade_activity(api, filters, select, mark, merge))
         return {"grades": grades}
 
-    _tmp.__annotations__.update(
-        {
-            "name": "grade",
-            "in": ["filters", "api"],
-            "out": ["grades"],
-        }
-    )
-    return _tmp
+    return _grade
+
+
+@cli.command()
+def rerun():
+    """Rerun selected traces"""
+
+    def _rerun(api: ApiActivity, filters: list[Callable[[str], bool]]) -> dict:
+        subs = map(
+            lambda x: (x.submissionDefinitionUri, x.id),
+            sorted(
+                filter(
+                    (lambda x: all(f(x.submissionDefinitionUri) for f in filters)),
+                    api.explore(),
+                ),
+                key=lambda x: x.submissionDefinitionUri,
+            ),
+        )
+
+        for subUri, grp in it.groupby(subs, key=lambda x: x[0]):
+            ids = [x[1] for x in grp]
+            if click.confirm(f"Rerun {len(ids)} for {subUri}", default=True):
+                api.prepare(subUri, ids)
+        return {}
+
+    return _rerun
+
+
+@cli.command()
+@click.option(
+    "-a",
+    "--all",
+    "is_all",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Publish all submissions and not just the last",
+)
+@click.argument("state", type=bool)
+def publish(is_all, state: bool):
+    """Bulk-(Un)Publish selected traces"""
+
+    def _publish(api: ApiActivity, filters: list[Callable[[str], bool]]) -> dict:
+        subUri = [x for x in api.submissions_def if all(f(x) for f in filters)]
+
+        click.echo("\n".join(subUri))
+        if click.confirm(
+            f"Bulk {'' if state else 'un-'}publish {'all' if is_all else 'last'}",
+            default=True,
+        ):
+            res = api.bulk_publish(
+                subUri, "ALL" if is_all else "LAST_FOR_SUBMISSION_DEFINITION", state
+            )
+            click.echo(f"Publishing {len(res)}")
+        return {}
+
+    return _publish
 
 
 @cli.command()
 @click.argument("field", type=click.STRING)
 def tocsv(field: str):
-    def _tmp(api: ApiActivity, **kwargs) -> dict:
+    """Save variable as csv file. Only grades is supported for now"""
+
+    def _tocsv(api: ApiActivity, **kwargs) -> dict:
         with open(
             f"{api.activity.split('%2F')[1]}_{field}.csv", "w", encoding="utf-8"
         ) as f:
             f.writelines(f"{k},{v}\n" for k, v in kwargs[field].items())
+        click.echo(f"Wrote to {api.activity.split('%2F')[1]}_{field}.csv")
         return {}
 
-    _tmp.__annotations__.update(
-        {
-            "name": "tocsv",
-            "in": ["api", field],
-            "out": [],
-        }
-    )
-    return _tmp
+    _tocsv.__annotations__[field] = str
+    return _tocsv
 
 
 if __name__ == "__main__":
