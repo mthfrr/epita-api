@@ -92,3 +92,56 @@ def grade_activity(
         )
         for slug, stud_grp in sorted_group_by(subs, key=lambda x: x[0].groupSlug)
     }
+
+
+def grader(
+    act: ApiActivity,
+    ignore: list[str],
+    select: Literal["best", "last"],
+    mark: Literal["binary", "percent"],
+    merge: Literal["last", "avg"],
+) -> dict[str, float]:
+    act.submissions_as_dict(ignore)
+    total = sum(1 for x in act.assignments if all(f(x) for f in filters))
+
+    select_fn: dict[
+        str,
+        Callable[[Iterable[Tuple[dt.Submission, float]]], Tuple[dt.Submission, float]],
+    ] = {
+        "best": select_best,
+        "last": select_last,
+    }
+
+    mark_fn: dict[
+        str,
+        Callable[[dt.Submission], float],
+    ] = {
+        "binary": mark_binary,
+        "percent": mark_percent,
+    }
+
+    merge_fn: dict[
+        str,
+        Callable[[Iterable[Tuple[dt.Submission, float]]], float],
+    ] = {
+        "last": merge_last,
+        "avg": merge_avg(total),
+    }
+
+    subs = (
+        (x, mark_fn[mark](x))
+        for x in act.explore(submissionStatus="SUCCEEDED")
+        if all(f(x.submissionDefinitionUri) for f in filters)
+    )
+
+    return {
+        act.groups[slug].members[0]: merge_fn[merge](
+            (
+                select_fn[select](sub_grp)
+                for _, sub_grp in sorted_group_by(
+                    stud_grp, key=lambda x: x[0].submissionDefinitionUri
+                )
+            ),
+        )
+        for slug, stud_grp in sorted_group_by(subs, key=lambda x: x[0].groupSlug)
+    }

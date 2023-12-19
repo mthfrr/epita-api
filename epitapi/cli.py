@@ -27,7 +27,7 @@ from .grades import grade_activity
     help="Reinstall epitapi with pipx",
 )
 @click.pass_context
-def cli(ctx, update: bool):
+def cli(ctx, update: bool = False):
     assert ctx is not None
 
     if update:
@@ -42,8 +42,8 @@ def filter_args(x) -> set[str]:
 
 @cli.result_callback()
 @click.pass_context
-def check_and_run(ctx, actions: list):
-    # print(" | ".join(f"{a.__name__[1:]}({filter_args(a)})" for a in actions))
+def check_and_run(ctx, actions: list, **kwargs):
+    print(" | ".join(f"{a.__name__[1:]}({filter_args(a)})" for a in actions))
 
     ctx_vars = {}
     for ac in actions:
@@ -53,7 +53,6 @@ def check_and_run(ctx, actions: list):
                 ctx.abort()
         res = ac(**{x: ctx_vars[x] for x in filter_args(ac)})
         if res is None:
-            print(f"Interrupted on {ac.__annotations__['name']}")
             click.echo(f"Stopped on {ac.__name__[1:]}")
             ctx.abort()
 

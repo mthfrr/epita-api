@@ -21,6 +21,7 @@ license = { file = "LICENSE" }
 
 [project.scripts]
 epitapi = "epitapi.cli:cli"
+epigrades = "epitapi.epi_grades:epi_grades"
 
 [build-system]
 # These are the assumed default build requirements from pip:
