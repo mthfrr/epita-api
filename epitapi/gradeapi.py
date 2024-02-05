@@ -33,7 +33,11 @@ def grade_advanced(s: types.Submission) -> graded_submission:
 
     # print(f"{s.groupSlug} {s.ref}: {trace.keys()}")
 
-    if mean(x[1] for x in trace["build"]) != 1.0 or "Forbidden" in trace:
+    if (
+        mean(x[1] for x in trace["build"]) != 1.0
+        or "Forbidden" in trace
+        or "tests" not in trace
+    ):
         return (s, 0.0)
 
     res = {k: sum(x[1] for x in v) / len(v) for k, v in trace.items()}
